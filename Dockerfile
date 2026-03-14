@@ -30,7 +30,7 @@ COPY pyproject.toml poetry.lock $PROJECT_DIR/
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/pypoetry \
-    poetry install
+    poetry install --no-root
 
 COPY . $PROJECT_DIR/
 
