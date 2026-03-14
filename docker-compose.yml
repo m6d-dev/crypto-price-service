@@ -1,17 +1,94 @@
 services:
-  postgres_db:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - ENVIRONMENT=${APP_ENVIRONMENT}
     restart: unless-stopped
-    image: postgres:18
-    volumes:
-      - postgres_db:/var/lib/postgresql
-    environment:
-      - POSTGRES_DB=${DATABASE__DB}
-      - POSTGRES_USER=${DATABASE__USERNAME}
-      - POSTGRES_PASSWORD=${DATABASE__PASSWORD}
+    command: sh scripts/start_api.sh
     env_file:
       - .env
+    expose:
+      - "${SERVER_PORT}"
+    volumes:
+      - static_files:/code/static
+      - media_files:/code/media
+      - api_temp_files:/code/temp_files
+      - api_backups:/code/backups
+    depends_on:
+      - db
+    # networks:
+    #   - cripto-service
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: 'celery -A src.config.celery worker --loglevel=info'
+    depends_on:
+      - api
+      - redis
+    volumes:
+      - static_files:/code/static
+      - media_files:/code/media
+      - api_temp_files:/code/temp_files
+    expose:
+      - "${SERVER_PORT}"
+    # networks:
+    #   - cripto-service
+
+  beat:
+    build: .
+    command: 'celery -A src.config beat --loglevel=info'
+    depends_on:
+      - redis
+      - api
+      - worker
+    volumes:
+      - static_files:/code/static
+      - media_files:/code/media
+      - api_temp_files:/code/temp_files
+    expose:
+      - "${SERVER_PORT}"
+    restart: unless-stopped
+    # networks:
+    #   - cripto-service
+
+  db:
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "${DATABASE__PORT}:5432"
+      - "${DB_EXTERNAL_PORT}:${DB_PORT}"
+    command: ["postgres", "-p", "${DB_PORT}"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    # networks:
+    #   - cripto-service
+    image: postgres:17.6
+
+  redis:
+    expose:
+      - "${REDIS_PORT}"
+    command:
+      ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--port", "${REDIS_PORT}"]
+    volumes:
+      - redis_data:/var/lib/redis/data
+    restart: unless-stopped
+    # networks:
+    #   - cripto-service
+    image: redis:7.4
+
+# networks:
+#   cripto-service:
+#     driver: bridge
 
 volumes:
-  postgres_db:
+  api_temp_files:
+  api_backups:
+  static_files:
+  media_files:
+  postgres_data:
+  redis_data:

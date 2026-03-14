@@ -1,34 +1,35 @@
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import Connection, engine_from_config, pool
-from sqlalchemy.ext.asyncio import AsyncEngine
-
 from alembic import context
-from src.apps.core.config import get_settings
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
+from src.app.core.config import DatabaseSettings
+from src.app.data_access.orm.base.base_orm_models import SqlAlchemyBaseModel
+
+# Not remove 'noqa' from this line. It need to alembic could find all tables.
+from src.app.data_access.orm.models import *  # noqa
+
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-fileConfig(config.config_file_name)  # type: ignore
-
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-from src.apps.core.models import SqlAlchemyBaseModel  # noqa
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
 
 target_metadata = SqlAlchemyBaseModel.metadata
 
-# import other models here
-import app.auth.models  # noqa
+db_config = DatabaseSettings()
+config.set_main_option("sqlalchemy.url", db_config.url)
 
 
-def get_database_uri() -> str:
-    return get_settings().sqlalchemy_database_uri.render_as_string(hide_password=False)
+async def _async_session_factory() -> AsyncSession:
+    bind = create_async_engine(db_config.url, pool_pre_ping=True)
+    return async_sessionmaker(
+        bind=bind,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )()
 
 
 def run_migrations_offline() -> None:
@@ -43,12 +44,35 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = get_database_uri()
+    url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def run_migrations_online() -> None:
+    engine = create_async_engine(
+        db_config.url,
+        echo=True,
+        pool_pre_ping=True,
+    )
+
+    async with engine.connect() as connection:
+        await connection.run_sync(do_migrations)
+
+    await engine.dispose()
+
+
+def do_migrations(connection):
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
         compare_type=True,
         compare_server_default=True,
     )
@@ -57,50 +81,11 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def do_run_migrations(connection: Connection | None) -> None:
-    context.configure(
-        connection=connection, target_metadata=target_metadata, compare_type=True
-    )
-
-    with context.begin_transaction():
-        context.run_migrations()
-
-
-async def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
-
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
-    configuration = config.get_section(config.config_ini_section)
-    assert configuration
-    configuration["sqlalchemy.url"] = get_database_uri()
-    connectable = AsyncEngine(
-        engine_from_config(
-            configuration,
-            prefix="sqlalchemy.",
-            poolclass=pool.NullPool,
-            future=True,
-        )
-    )
-    async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
-
+# --- CRITICAL ENTRY POINT LOGIC ---
 
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    try:
-        loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop and loop.is_running():
-        # pytest-asyncio or other test runner is running the event loop
-        # so we need to use run_coroutine_threadsafe
-        future = asyncio.run_coroutine_threadsafe(run_migrations_online(), loop)
-        future.result(timeout=15)
-    else:
-        # no event loop is running, safe to use asyncio.run
-        asyncio.run(run_migrations_online())
+    # This is the entry point for "online" (connected to DB) mode
+    # It runs the async function using asyncio
+    asyncio.run(run_migrations_online())

@@ -1,0 +1,12 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Cripto Price Debugger",
+            "type": "debugpy",
+            "request": "launch",
+            "autoStartBrowser": false,
+            "program": "${workspaceFolder}/main.py"
+        }
+    ]
+}

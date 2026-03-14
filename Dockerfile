@@ -1,43 +1,43 @@
-FROM python:3.14-slim-trixie AS base
+FROM python:3.14
 
-ENV PYTHONUNBUFFERED=1
-WORKDIR /build
 
-# Create requirements.txt file
-FROM base AS uv
-COPY --from=ghcr.io/astral-sh/uv:0.9.2 /uv /uvx /bin/
-COPY uv.lock pyproject.toml ./
-RUN uv export --no-dev --no-hashes -o /requirements.txt --no-install-workspace --frozen
-RUN uv export --only-group dev --no-hashes -o /requirements-dev.txt --no-install-workspace --frozen
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1 \
+    POETRY_VIRTUALENVS_CREATE=false \
+    PIP_NO_CACHE_DIR=off \
+    PROJECT_DIR="/code"
 
-FROM base AS final
-COPY --from=uv /requirements.txt .
 
-# Create venv, add it to path and install requirements
-RUN python -m venv /venv
-ENV PATH="/venv/bin:$PATH"
-RUN pip install -r requirements.txt
+WORKDIR ${PROJECT_DIR}
 
-# Install uvicorn server
-RUN pip install uvicorn[standard]
+RUN --mount=type=cache,target=/root/.apk apk update && apk add --no-cache \
+    build-base \
+    gcc \
+    musl-dev \
+    libffi-dev \
+    openssl-dev \
+    postgresql-dev \
+    postgresql17-client \
+    curl
 
-# Copy the rest of app
-COPY app app
-COPY alembic alembic
-COPY alembic.ini .
-COPY pyproject.toml .
-COPY init.sh .
+ENV POETRY_HOME="/opt/poetry"
+ENV PATH="$POETRY_HOME/bin:$PATH"
 
-# Expose port 8000 for app and optional 9090 for prometheus metrics
+RUN curl -sSL https://install.python-poetry.org | python3 - \
+    && ln -s /opt/poetry/bin/poetry /usr/local/bin/poetry
+
+COPY pyproject.toml poetry.lock $PROJECT_DIR/
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/pypoetry \
+    poetry install --no-root --only main
+
+COPY . $PROJECT_DIR/
+
+RUN chmod +x ${PROJECT_DIR}/scripts/start_api.sh \
+  && mkdir -p ${PROJECT_DIR}/media ${PROJECT_DIR}/static \
+  && chmod -R 755 ${PROJECT_DIR}/media ${PROJECT_DIR}/static
+
 EXPOSE 8000
-EXPOSE 9090
 
-# Make the init script executable
-RUN chmod +x ./init.sh
-
-# Set ENTRYPOINT to always run init.sh
-ENTRYPOINT ["./init.sh"]
-
-# Set CMD to uvicorn
-# /venv/bin/uvicorn is used because from entrypoint script PATH is new
-CMD ["/venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--loop", "uvloop"]
+CMD ["./scripts/start_api.sh"]

@@ -7,4 +7,3 @@ class SqlAlchemyBaseModel(DeclarativeBase):
     @declared_attr
     def id(cls) -> Mapped[ID_T]:
         return mapped_column(primary_key=True, default=generate_id)
-
