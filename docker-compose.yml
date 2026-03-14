@@ -11,6 +11,8 @@ services:
       - .env
     expose:
       - "${SERVER_PORT}"
+    ports:
+    - "${SERVER_PORT}:${SERVER_PORT}"
     volumes:
       - static_files:/code/static
       - media_files:/code/media
