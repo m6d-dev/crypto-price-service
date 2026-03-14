@@ -24,7 +24,7 @@ services:
   worker:
     build: .
     restart: unless-stopped
-    command: 'celery -A src.config.celery worker --loglevel=info'
+    command: 'celery -A src.app.tasks.celery_app worker --loglevel=info'
     depends_on:
       - api
       - redis
@@ -39,7 +39,7 @@ services:
 
   beat:
     build: .
-    command: 'celery -A src.config beat --loglevel=info'
+    command: 'celery -A src.app.tasks.celery_app beat --loglevel=info'
     depends_on:
       - redis
       - api
